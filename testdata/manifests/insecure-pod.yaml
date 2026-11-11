@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: insecure-pod
+  namespace: default
+spec:
+  hostNetwork: true
+  hostPID: true
+  containers:
+    - name: app
+      image: nginx:1.25
+      securityContext:
+        allowPrivilegeEscalation: true
+  initContainers:
+    - name: init
+      image: busybox:1.36
+      # 无 securityContext —— allowPrivilegeEscalation 缺省即为 true
+  ephemeralContainers:
+    - name: debugger
+      image: busybox:1.36
+      securityContext:
+        allowPrivilegeEscalation: true

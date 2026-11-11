@@ -1,0 +1,94 @@
+apiVersion: rules.spotter.dev/v1alpha1
+kind: SpotterRule
+metadata:
+  name: spotter-workload-001
+  labels:
+    severity: "medium"
+    category: "workload"
+  annotations:
+    rules.spotter.dev/title: "Containers Must Not Allow Privilege Escalation"
+    rules.spotter.dev/version: "1.0.0"
+    rules.spotter.dev/description: "Detects containers where allowPrivilegeEscalation is true or unset. Kubernetes defaults allowPrivilegeEscalation to true, so a missing field is treated as a violation; only an explicit false passes."
+    rules.spotter.dev/cwe: "CWE-269"
+    rules.spotter.dev/author: "Security Team"
+spec:
+  match:
+    resources:
+      kubernetes:
+        apiGroups: ["", "apps", "batch"]
+        versions: ["v1"]
+        kinds: ["Pod", "Deployment", "CronJob"]
+  cel: |
+    // allowPrivilegeEscalation defaults to true in Kubernetes when unset,
+    // so a container violates unless it explicitly sets
+    // securityContext.allowPrivilegeEscalation: false.
+    // Covers containers, initContainers and ephemeralContainers across
+    // bare Pods, Deployment pod templates and CronJob jobTemplate nesting.
+    // has() guards are layered so short paths never dereference missing parents.
+    (
+      object.kind == 'Pod' && has(object.spec) && (
+        (has(object.spec.containers) && object.spec.containers.exists(c,
+          !has(c.securityContext) ||
+          !has(c.securityContext.allowPrivilegeEscalation) ||
+          c.securityContext.allowPrivilegeEscalation == true)) ||
+        (has(object.spec.initContainers) && object.spec.initContainers.exists(c,
+          !has(c.securityContext) ||
+          !has(c.securityContext.allowPrivilegeEscalation) ||
+          c.securityContext.allowPrivilegeEscalation == true)) ||
+        (has(object.spec.ephemeralContainers) && object.spec.ephemeralContainers.exists(c,
+          !has(c.securityContext) ||
+          !has(c.securityContext.allowPrivilegeEscalation) ||
+          c.securityContext.allowPrivilegeEscalation == true))
+      )
+    ) || (
+      object.kind == 'Deployment' &&
+      has(object.spec.template) && has(object.spec.template.spec) && (
+        (has(object.spec.template.spec.containers) && object.spec.template.spec.containers.exists(c,
+          !has(c.securityContext) ||
+          !has(c.securityContext.allowPrivilegeEscalation) ||
+          c.securityContext.allowPrivilegeEscalation == true)) ||
+        (has(object.spec.template.spec.initContainers) && object.spec.template.spec.initContainers.exists(c,
+          !has(c.securityContext) ||
+          !has(c.securityContext.allowPrivilegeEscalation) ||
+          c.securityContext.allowPrivilegeEscalation == true)) ||
+        (has(object.spec.template.spec.ephemeralContainers) && object.spec.template.spec.ephemeralContainers.exists(c,
+          !has(c.securityContext) ||
+          !has(c.securityContext.allowPrivilegeEscalation) ||
+          c.securityContext.allowPrivilegeEscalation == true))
+      )
+    ) || (
+      object.kind == 'CronJob' &&
+      has(object.spec.jobTemplate) && has(object.spec.jobTemplate.spec) &&
+      has(object.spec.jobTemplate.spec.template) && has(object.spec.jobTemplate.spec.template.spec) && (
+        (has(object.spec.jobTemplate.spec.template.spec.containers) && object.spec.jobTemplate.spec.template.spec.containers.exists(c,
+          !has(c.securityContext) ||
+          !has(c.securityContext.allowPrivilegeEscalation) ||
+          c.securityContext.allowPrivilegeEscalation == true)) ||
+        (has(object.spec.jobTemplate.spec.template.spec.initContainers) && object.spec.jobTemplate.spec.template.spec.initContainers.exists(c,
+          !has(c.securityContext) ||
+          !has(c.securityContext.allowPrivilegeEscalation) ||
+          c.securityContext.allowPrivilegeEscalation == true)) ||
+        (has(object.spec.jobTemplate.spec.template.spec.ephemeralContainers) && object.spec.jobTemplate.spec.template.spec.ephemeralContainers.exists(c,
+          !has(c.securityContext) ||
+          !has(c.securityContext.allowPrivilegeEscalation) ||
+          c.securityContext.allowPrivilegeEscalation == true))
+      )
+    )
+  remediation:
+    manual: |
+      To fix this security issue:
+      1. Locate every container, initContainer and ephemeralContainer in the resource
+      2. Set `allowPrivilegeEscalation: false` in each container's securityContext
+      3. Note that Kubernetes defaults this field to true, so omitting it is not sufficient
+      4. Validate the application still works; most workloads do not need privilege escalation
+
+      Example fix:
+      ```yaml
+      securityContext:
+        allowPrivilegeEscalation: false
+      ```
+  references:
+    - title: "Kubernetes Pod Security Standards (Restricted)"
+      url: "https://kubernetes.io/docs/concepts/security/pod-security-standards/#restricted"
+    - title: "CIS Kubernetes Benchmark - 5.1.6 Minimize the admission of containers with allowPrivilegeEscalation"
+      url: "https://www.cisecurity.org/benchmark/kubernetes"

@@ -1,0 +1,65 @@
+apiVersion: rules.spotter.dev/v1alpha1
+kind: SpotterRule
+metadata:
+  name: spotter-platform-001
+  labels:
+    severity: "high"
+    category: "platform"
+  annotations:
+    rules.spotter.dev/title: "Pods Must Not Share Host Network or Process Namespaces"
+    rules.spotter.dev/version: "1.0.0"
+    rules.spotter.dev/description: "Detects workloads that set hostNetwork or hostPID to true. Sharing host namespaces exposes the pod to host network interfaces and processes, breaking container isolation."
+    rules.spotter.dev/cwe: "CWE-668"
+    rules.spotter.dev/author: "Security Team"
+spec:
+  match:
+    resources:
+      kubernetes:
+        apiGroups: ["", "apps", "batch"]
+        versions: ["v1"]
+        kinds: ["Pod", "Deployment", "CronJob"]
+  cel: |
+    // hostNetwork / hostPID default to false, so only an explicit true is a
+    // violation. The pod spec lives at different depths per kind:
+    //   Pod        -> spec
+    //   Deployment -> spec.template.spec
+    //   CronJob    -> spec.jobTemplate.spec.template.spec
+    // has() guards are layered so a short path never dereferences a missing
+    // parent (e.g. a Pod must not evaluate spec.template).
+    (
+      object.kind == 'Pod' && has(object.spec) && (
+        (has(object.spec.hostNetwork) && object.spec.hostNetwork == true) ||
+        (has(object.spec.hostPID) && object.spec.hostPID == true)
+      )
+    ) || (
+      object.kind == 'Deployment' &&
+      has(object.spec.template) && has(object.spec.template.spec) && (
+        (has(object.spec.template.spec.hostNetwork) && object.spec.template.spec.hostNetwork == true) ||
+        (has(object.spec.template.spec.hostPID) && object.spec.template.spec.hostPID == true)
+      )
+    ) || (
+      object.kind == 'CronJob' &&
+      has(object.spec.jobTemplate) && has(object.spec.jobTemplate.spec) &&
+      has(object.spec.jobTemplate.spec.template) && has(object.spec.jobTemplate.spec.template.spec) && (
+        (has(object.spec.jobTemplate.spec.template.spec.hostNetwork) && object.spec.jobTemplate.spec.template.spec.hostNetwork == true) ||
+        (has(object.spec.jobTemplate.spec.template.spec.hostPID) && object.spec.jobTemplate.spec.template.spec.hostPID == true)
+      )
+    )
+  remediation:
+    manual: |
+      To fix this security issue:
+      1. Remove `hostNetwork: true` and `hostPID: true` from the pod spec, or set them to false
+      2. If host networking is required, isolate the workload on dedicated nodes with taints
+      3. Use a Service or port-forwarding instead of hostNetwork where possible
+
+      Example fix:
+      ```yaml
+      spec:
+        hostNetwork: false
+        hostPID: false
+      ```
+  references:
+    - title: "Kubernetes Pod Security Standards (Baseline)"
+      url: "https://kubernetes.io/docs/concepts/security/pod-security-standards/#baseline"
+    - title: "CIS Kubernetes Benchmark - 5.2.2/5.2.3 Minimize the admission of containers wishing to share the host network/process namespace"
+      url: "https://www.cisecurity.org/benchmark/kubernetes"
